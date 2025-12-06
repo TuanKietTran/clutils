@@ -9,28 +9,46 @@ permissions:
   contents: write
 
 jobs:
+  # Step 1: Clone & cache vcpkg once
+  prepare-vcpkg:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
+    steps:
+      - name: Cache vcpkg
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: vcpkg
+          key: vcpkg-${{ runner.os }}-2025-12-06
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Clone vcpkg (if cache miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+          ./vcpkg/bootstrap-vcpkg.sh
+
+  # Step 2: Build on all platforms (uses cached vcpkg)
   build:
+    needs: prepare-vcpkg
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubiquitin-latest
             triplet: x64-linux
             artifact: clutils-linux-x64
-            setup: bash scripts/setup.sh
             deps: sudo apt-get update && sudo apt-get install -y libuuid-dev ninja-build
 
           - os: macos-latest
             triplet: arm64-osx
             artifact: clutils-macos-arm64
-            setup: bash scripts/setup.sh
 
           - os: windows-latest
             triplet: x64-windows
             artifact: clutils-windows-x64.exe
-            setup: powershell -File scripts/setup.ps1
 
     runs-on: ${{ matrix.os }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -38,18 +56,19 @@ jobs:
         if: matrix.deps
         run: ${{ matrix.deps }}
 
-      - name: Cache vcpkg
+      - name: Restore vcpkg from cache
         uses: actions/cache@v4
         with:
-          path: |
-            vcpkg
-            !vcpkg/downloads
-            !vcpkg/buildtrees
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: vcpkg-${{ runner.os }}-
+          path: vcpkg
+          key: vcpkg-${{ runner.os }}-2025-12-06
 
       - name: Run setup script
-        run: ${{ matrix.setup }}
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            powershell -File scripts/setup.ps1
+          else
+            bash scripts/setup.sh
+          fi
 
       - name: Prepare artifact
         shell: bash
@@ -67,6 +86,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: release/${{ matrix.artifact }}
 
+  # Step 3: Release
   release:
     needs: build
     runs-on: ubuntu-latest
