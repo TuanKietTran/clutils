@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.20)
 project(clutils LANGUAGES CXX)
 
 # Prefer local vcpkg inside the repo (created by setup.sh)
