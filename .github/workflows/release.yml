@@ -5,6 +5,9 @@ on:
     tags: [ 'v*.*.*' ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -13,45 +16,53 @@ jobs:
           - os: ubuntu-latest
             triplet: x64-linux
             artifact: clutils-linux-x64
-            setup-script: bash scripts/setup.sh
+            setup: bash scripts/setup.sh
+            deps: sudo apt-get update && sudo apt-get install -y libuuid-dev ninja-build
 
           - os: macos-latest
-            triplet: arm64-osx          # Apple Silicon = fast & correct
+            triplet: arm64-osx
             artifact: clutils-macos-arm64
-            setup-script: bash scripts/setup.sh
+            setup: bash scripts/setup.sh
 
           - os: windows-latest
             triplet: x64-windows
             artifact: clutils-windows-x64.exe
-            setup-script: powershell -File scripts/setup.ps1
+            setup: powershell -File scripts/setup.ps1
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkg-config
+      - name: Install system deps
+        if: matrix.deps
+        run: ${{ matrix.deps }}
 
-      - name: Run setup script (clone vcpkg + build)
-        run: ${{ matrix.setup-script }}
-        shell: bash   # forces bash even on Windows (needed for the Linux/macOS jobs)
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcpkg
+            !vcpkg/downloads
+            !vcpkg/buildtrees
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
 
-      - name: Prepare release binary
+      - name: Run setup script
+        run: ${{ matrix.setup }}
+
+      - name: Prepare artifact
         shell: bash
         run: |
-          mkdir -p release
+          mkdir release
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp build/Release/clutils.exe release/${{ matrix.artifact }}
+            cp build/clutils.exe release/${{ matrix.artifact }}
           else
             cp build/clutils release/${{ matrix.artifact }}
             chmod +x release/${{ matrix.artifact }}
           fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: release/${{ matrix.artifact }}
@@ -59,16 +70,9 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            */clutils-*
+          files: "*/clutils-*"
           generate_release_notes: true
