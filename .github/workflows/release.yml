@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'          # Trigger on tags like v1.0.0
+      - 'v*.*.*'
 
 jobs:
   build:
@@ -12,47 +12,61 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            name: linux-x64
+            triplet: x64-linux
             artifact: clutils-linux-x64
           - os: macos-latest
-            name: macos-x64
+            triplet: x64-osx
             artifact: clutils-macos-x64
           - os: windows-latest
-            name: windows-x64.exe
+            triplet: x64-windows
             artifact: clutils-windows-x64.exe
 
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash  # ← force bash on all platforms (critical for Windows!)
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies (Ubuntu)
+      # Linux: install OpenSSL headers (vcpkg will build the lib)
+      - name: Install Linux deps
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
+      # Clone + bootstrap vcpkg correctly on every OS
       - name: Set up vcpkg
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git
-          ./vcpkg/bootstrap-vcpkg.sh   # Linux/macOS
-          ./vcpkg/bootstrap-vcpkg.bat  # Windows (runs on Windows runner)
-        shell: bash
 
-      - name: Build with CMake
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ./vcpkg/bootstrap-vcpkg.bat
+          else
+            ./vcpkg/bootstrap-vcpkg.sh
+          fi
+
+      # Build with explicit triplet (makes binaries as static as possible)
+      - name: CMake configure & build
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
             -DCMAKE_CXX_STANDARD=20
+
           cmake --build build --config Release --parallel
 
-      - name: Rename binary
+      # Copy binary with correct name
+      - name: Prepare release asset
         run: |
-          mkdir -p release
-          cp build/clutils           release/${{ matrix.artifact }}     || true
-          cp build/Release/clutils.exe release/${{ matrix.artifact }}   || true
-        shell: bash
+          mkdir release
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp build/Release/clutils.exe release/${{ matrix.artifact }}
+          else
+            cp build/clutils release/${{ matrix.artifact }}
+            chmod +x release/${{ matrix.artifact }}
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -60,7 +74,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: release/${{ matrix.artifact }}
 
-  create-release:
+  release:
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -68,14 +82,10 @@ jobs:
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
-        with:
-          path: artifacts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/*/clutils-*
-          draft: false
-          prerelease: false
+            */clutils-*
           generate_release_notes: true
