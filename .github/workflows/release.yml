@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
-
+  workflow_dispatch:      # ← this adds the "Run workflow" button
 jobs:
   build:
     strategy:
