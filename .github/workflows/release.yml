@@ -35,7 +35,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubiquitin-latest
+          - os: ubuntu-latest
             triplet: x64-linux
             artifact: clutils-linux-x64
             deps: sudo apt-get update && sudo apt-get install -y libuuid-dev ninja-build
