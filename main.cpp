@@ -1,4 +1,3 @@
-// clutils.cpp - Modern C++ CLI Swiss Army Knife (2025 edition)
 // Compile with CLion + vcpkg OpenSSL → fully local, no global libs
 
 #include <charconv>

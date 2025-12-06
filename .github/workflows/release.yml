@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'          # Trigger on tags like v1.0.0
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+            artifact: clutils-linux-x64
+          - os: macos-latest
+            name: macos-x64
+            artifact: clutils-macos-x64
+          - os: windows-latest
+            name: windows-x64.exe
+            artifact: clutils-windows-x64.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Set up vcpkg
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+          ./vcpkg/bootstrap-vcpkg.sh   # Linux/macOS
+          ./vcpkg/bootstrap-vcpkg.bat  # Windows (runs on Windows runner)
+        shell: bash
+
+      - name: Build with CMake
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DCMAKE_CXX_STANDARD=20
+          cmake --build build --config Release --parallel
+
+      - name: Rename binary
+        run: |
+          mkdir -p release
+          cp build/clutils           release/${{ matrix.artifact }}     || true
+          cp build/Release/clutils.exe release/${{ matrix.artifact }}   || true
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/${{ matrix.artifact }}
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*/clutils-*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
